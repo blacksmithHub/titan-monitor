@@ -1,0 +1,44 @@
+{
+  "name": "talos-monitor",
+  "version": "1.0.0",
+  "description": "Titan22 Monitor",
+  "main": "index.js",
+  "scripts": {},
+  "author": "The Blacksmith",
+  "license": "MIT",
+  "dependencies": {
+    "discord.js": "^12.5.1",
+    "dotenv": "^8.2.0",
+    "lodash": "^4.17.20",
+    "moment": "^2.29.1",
+    "qs": "^6.9.6",
+    "request": "^2.88.2",
+    "user-agents": "^1.0.559",
+    "babel-eslint": "^10.1.0",
+    "electron": "^9.3.2",
+    "electron-devtools-installer": "^3.1.0",
+    "electron-icon-builder": "^1.0.2",
+    "eslint": "^6.7.2",
+    "eslint-config-standard": "^14.1.1",
+    "eslint-plugin-import": "^2.20.1",
+    "eslint-plugin-node": "^11.0.0",
+    "eslint-plugin-promise": "^4.2.1",
+    "eslint-plugin-standard": "^4.0.1",
+    "eslint-plugin-vue": "^6.2.2",
+    "@vue/cli-plugin-eslint": "^4.5.0"
+  },
+  "eslintConfig": {
+    "root": true,
+    "env": {
+      "node": true
+    },
+    "extends": [
+      "plugin:vue/essential",
+      "eslint:recommended"
+    ],
+    "parserOptions": {
+      "parser": "babel-eslint"
+    },
+    "rules": {}
+  }
+}
