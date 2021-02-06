@@ -1,313 +1,179 @@
 const { config } = require('dotenv')
 
 const Discord = require('discord.js')
-const UserAgent = require('user-agents')
-const qs = require('qs')
-const moment = require('moment')
-const _ = require('lodash')
+const monitor = require('./monitor')
 
 config({ path: `${__dirname}/.env` })
 
-let hooks = []
-let loop = null
+const client = new Discord.Client()
 
-startMonitor()
+const prefix = '!T'
+const commands = ['info', 'help', 'start', 'stop', 'restart', 'proxy', 'delay']
 
-/**
- * Start backend monitor
- *
- */
-function startMonitor () {
-  loop = setTimeout(async () => {
-    try {
-      let request = require('request')
+const commandList = new Discord.MessageEmbed()
+  .setColor('#f7b586')
+  .setTitle('Talos Bot Help Commands:')
+  .addFields(
+    { name: 'Monitor Information', value: '`!info` \nTo show all monitor information', inline: true },
+    { name: 'Command list', value: '`!help` \nTo show all available commands', inline: true },
+    { name: 'Start Monitor', value: '`!start` \nTo start monitor', inline: true },
+    { name: 'Stop Monitor', value: '`!stop` \nTo stop monitor', inline: true },
+    { name: 'Restart Monitor', value: '`!restart` \nAllows you to restart the monitor', inline: true },
+    { name: 'List All Proxy', value: '`!proxy -list` \nTo show all proxies', inline: true },
+    { name: 'Add New Proxy', value: '`!proxy -add <proxy>` \nAllows you to add new proxy to monitor', inline: true },
+    { name: 'Remove Proxy', value: '`!proxy -rm <proxy>` \nAllows you to remove proxy from the list', inline: true },
+    { name: 'Clear Proxies', value: '`!proxy -clear` \nAllows you to clear all proxies from the list', inline: true },
+    { name: 'Set Delay', value: '`!delay <ms>` \nTo set monitor delay', inline: true }
+  )
 
-      const pool = [
-        '45.91.115.138:64181:run:K35f2SvF',
-        '45.91.115.139:62048:run:K35f2SvF',
-        '45.91.115.14:54933:run:K35f2SvF',
-        '45.91.115.140:60205:run:K35f2SvF',
-        '45.91.115.141:62330:run:K35f2SvF',
-        '45.91.115.142:61608:run:K35f2SvF',
-        '45.91.115.143:54895:run:K35f2SvF',
-        '45.91.115.144:63986:run:K35f2SvF',
-        '45.91.115.145:54366:run:K35f2SvF',
-        '45.91.115.146:63146:run:K35f2SvF'
-      ]
+client.once('ready', () => {
+  console.log('Talos Bot is now online!')
+  monitor.startMonitor()
+})
 
-      let proxy = pool[Math.floor(Math.random() * pool.length)]
+client.on('message', message => {
+  if (!message.content.startsWith(prefix) || message.author.bot || message.channel.id !== process.env.CHANNEL) return
 
-      proxy = proxy.split(':')
+  const args = message.content.slice(prefix.length).split(/ +/)
+  const command = args.shift().toLowerCase()
+  const bot = client.channels.cache.find(channel => channel.id === process.env.CHANNEL)
 
-      request = request.defaults({ proxy: `http://${proxy[2]}:${proxy[3]}@${proxy[0]}:${proxy[1]}` })
-
-      const payload = {
-        searchCriteria: {
-          filterGroups: [
-            {
-              filters: [
-                {
-                  field: 'updated_at',
-                  value: moment('00:00:00', 'HH:mm').format('YYYY-MM-DD HH:mm:ss'),
-                  condition_type: 'gteq'
-                },
-                {
-                  field: 'created_at',
-                  value: moment('00:00:00', 'HH:mm').format('YYYY-MM-DD HH:mm:ss'),
-                  condition_type: 'gteq'
-                }
-              ]
-            },
-            {
-              filters: [
-                {
-                  field: 'attribute_set_id',
-                  value: '10',
-                  condition_type: 'eq'
-                }
-              ]
-            }
-          ]
-        }
-      }
-
-      const query = qs.stringify(payload)
-
-      const userAgent = new UserAgent()
-
-      const config = {
-        uri: `${process.env.TITAN_DOMAIN}/rest/V2/products?${query}`,
-        method: 'get',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.TITAN_TOKEN}`,
-          'User-Agent': userAgent.toString()
-        }
-      }
-
-      console.log(proxy)
-
-      await request(config, async (error, response) => {
-        if (error) {
-          console.log(error)
-          clearTimeout(loop)
-          startMonitor()
-        }
-
-        if (response.statusCode === 200) {
-          console.log('Monitoring...')
-
-          const products = JSON.parse(response.body).items
-
-          const footwearSizes = products.slice().filter((val) => val.custom_attributes.find((el) => el.attribute_code === 'm_footwear_size'))
-          let footwear = products.slice().filter((val) => !val.custom_attributes.find((el) => el.attribute_code === 'm_footwear_size'))
-
-          let collect = []
-
-          if (footwearSizes.length) {
-            collect = footwearSizes.slice().map(element => {
-              const sku = element.sku.split('-')
-              sku.pop()
-
-              const check = footwear.slice().find((val) => _.includes(val.sku, sku.join('-')))
-
-              return (!check) ? sku.join('-') : ''
-            })
-
-            collect = _.uniq(collect).filter((el) => el)
-          }
-
-          if (collect.length) {
-            collect = collect.map(element => {
-              return {
-                field: 'sku',
-                value: element
-              }
-            })
-
-            const payload = {
-              searchCriteria: {
-                filterGroups: [
-                  {
-                    filters: collect
-                  },
-                  {
-                    filters: [
-                      {
-                        field: 'attribute_set_id',
-                        value: '10',
-                        condition_type: 'eq'
-                      }
-                    ]
-                  }
-                ]
-              }
-            }
-
-            const query = qs.stringify(payload)
-
-            const userAgent = new UserAgent()
-
-            const config = {
-              uri: `${process.env.TITAN_DOMAIN}/rest/V2/products?${query}`,
-              method: 'get',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${process.env.TITAN_TOKEN}`,
-                'User-Agent': userAgent.toString()
-              }
-            }
-
-            console.log('one')
-
-            await request(config, (error, response) => {
-              if (error) {
-                console.log(error)
-                clearTimeout(loop)
-                startMonitor()
-              }
-
-              if (response.statusCode === 200) {
-                footwear = footwear.concat(JSON.parse(response.body).items)
-                sendWebhook(footwear, footwearSizes)
-              }
-            })
-          } else {
-            sendWebhook(footwear, footwearSizes)
-          }
-        } else {
-          console.log(response.statusCode)
-          clearTimeout(loop)
-          startMonitor()
-        }
-      })
-    } catch (error) {
-      console.log(error)
-      clearTimeout(loop)
-      startMonitor()
-    }
-  }, 30000)
-}
-
-/**
- * Send webhook to discord
- *
- * @param {*} footwear
- * @param {*} footwearSizes
- */
-async function sendWebhook (footwear, footwearSizes) {
-  let results = footwear.slice().map(element => {
-    const url = element.custom_attributes.find((val) => val.attribute_code === 'url_key')
-    const img = element.custom_attributes.find((val) => val.attribute_code === 'image')
-
-    const item = {
-      name: element.name,
-      sku: element.sku,
-      price: element.price,
-      page: (url) ? url.value : '',
-      img: (img) ? img.value : ''
-    }
-
-    const sizes = footwearSizes.slice().filter((val) => _.includes(val.sku, item.sku))
-
-    if (sizes.length) {
-      item.sizes = sizes.map((val) => {
-        let urlSize = val.custom_attributes.find((value) => value.attribute_code === 'url_key')
-        let imgurlSize = val.custom_attributes.find((value) => value.attribute_code === 'image')
-
-        urlSize = (urlSize) ? urlSize.value : ''
-        imgurlSize = (imgurlSize) ? imgurlSize.value : ''
-
-        item.price = val.price || item.price
-        item.page = urlSize || item.page
-        item.img = imgurlSize || item.img
-
-        let sku = val.sku.slice(val.sku.length - 4)
-
-        const format = /[-]/.exec(sku)
-
-        if (format) sku = sku.slice(format.index + 1)
-
-        if (_.includes(sku, 'Z')) sku = sku.slice(sku.indexOf('Z') + 1)
-
-        if (_.includes(sku, 'P')) sku = sku.replace('P', '.')
-
-        return (!val.extension_attributes.out_of_stock) ? sku : ''
-      })
-        .filter((el) => el)
-    }
-
-    return item
-  })
-
-  results = results.filter(element => {
-    const hook = hooks.find((val) => val.sku === element.sku)
-
-    if (!hook) {
-      hooks.push(element)
-      return true
-    } else if (hook && hook.sizes.length !== element.sizes.length) {
-      const collect = hooks.slice()
-
-      const index = collect.indexOf(hook)
-      collect[index] = element
-
-      hooks = collect
-      return true
-    } else {
-      return false
-    }
-  })
-
-  if (results.length) {
-    for (let index = 0; index < results.length; index++) {
-      console.log(results[index].name)
-
-      if (index) await new Promise(resolve => setTimeout(resolve, 10000))
-
-      const url = process.env.WEBHOOK.split('/')
-      const webhookClient = new Discord.WebhookClient(url[5], url[6])
-
-      const embed = new Discord.MessageEmbed().setColor('#f7b586')
-
-      if (results[index].img) {
-        let slug = results[index].img.split(/ +/)
-
-        if (slug.length > 1) {
-          slug = slug.join('%20')
-        } else {
-          slug = results[index].img
-        }
-
-        embed.setThumbnail(`${process.env.TITAN_DOMAIN}/media/catalog/product${slug}`)
-      }
-
-      if (results[index].name && results[index].sku) embed.addField(results[index].name, results[index].sku)
-
-      if (results[index].sizes.length) embed.addField('Sizes:', _.uniq(results[index].sizes), true)
-
-      embed.addField('Price', `Php ${results[index].price.toLocaleString()}`, true)
-
-      if (results[index].page) {
-        let slug = results[index].page.split(/ +/)
-
-        if (slug.length > 1) {
-          slug = slug.join('%20')
-        } else {
-          slug = results[index].page
-        }
-
-        embed.addField('Product Page', `[Link](${process.env.TITAN_DOMAIN}/${slug}.html)`, true)
-      }
-
-      await webhookClient.send({
-        username: 'TALOS-IO',
-        avatarURL: 'https://i.imgur.com/3HQZ0ol.png',
-        embeds: [embed]
-      })
-    }
+  if (!commands.includes(command)) {
+    bot.send(commandList)
+    return
   }
 
-  clearTimeout(loop)
-  startMonitor()
-}
+  switch (command) {
+    case 'info':
+      {
+        const configs = new Discord.MessageEmbed()
+          .setColor('#f7b586')
+          .addFields(
+            { name: 'Status', value: monitor.getStatus(), inline: true },
+            { name: 'Proxies', value: monitor.getPool().length, inline: true },
+            { name: 'Delay', value: monitor.getDelay(), inline: true }
+          )
+
+        bot.send(configs)
+      }
+      break
+
+    case 'help':
+      bot.send(commandList)
+      break
+
+    case 'start':
+      // monitor.restartMonitor()
+      bot.send('Monitor is now running!')
+      break
+
+    case 'stop':
+      // monitor.stopMonitor()
+      bot.send('Monitor has been stopped running!')
+      break
+
+    case 'restart':
+      // monitor.restartMonitor()
+      bot.send('Monitor has been restarted!')
+      break
+
+    case 'delay':
+      {
+        const ms = message.content.slice((`${prefix}${command}`).length + 1).split(/ +/).shift().toLowerCase()
+
+        if (parseInt(ms)) {
+          monitor.setDelay(parseInt(ms))
+          bot.send('Delay has been set successfully!')
+        } else {
+          bot.send('Invalid input!')
+        }
+      }
+      break
+
+    case 'proxy':
+      {
+        const key = message.content.slice((`${prefix}${command}`).length + 1).split(/ +/).shift().toLowerCase()
+
+        switch (key) {
+          case '-list':
+            {
+              const proxies = new Discord.MessageEmbed()
+                .setColor('#f7b586')
+                .addFields({ name: 'Proxy Pool', value: `${(monitor.getPool().length) ? monitor.getPool() : 'empty'}`, inline: true })
+
+              bot.send(proxies)
+            }
+            break
+
+          case '-add':
+            {
+              let proxy = message.content.slice((`${prefix}${command} ${key}`).length + 1).split(/ +/).shift().toLowerCase()
+
+              if (!proxy) {
+                bot.send(commandList)
+                break
+              }
+
+              proxy = proxy.split(':')
+
+              switch (proxy.length) {
+                case 4:
+                case 2:
+                  if (!monitor.getPool().find((el) => el === proxy.join(':'))) {
+                    monitor.addProxy(proxy.join(':'))
+                    bot.send('Proxy has been added successfully!')
+                  } else {
+                    bot.send('Proxy already exists!')
+                  }
+                  break
+
+                default:
+                  bot.send('Proxy format should be: <ip:port> / <ip:port:username:password>')
+                  break
+              }
+            }
+            break
+
+          case '-rm':
+            {
+              let proxy = message.content.slice((`${prefix}${command} ${key}`).length + 1).split(/ +/).shift().toLowerCase()
+
+              if (!proxy) {
+                bot.send(commandList)
+                break
+              }
+
+              proxy = proxy.split(':')
+
+              switch (proxy.length) {
+                case 4:
+                case 2:
+                  if (monitor.getPool().find((el) => el === proxy.join(':'))) {
+                    monitor.removeProxy(proxy.join(':'))
+                    bot.send('Proxy has been removed successfully!')
+                  } else {
+                    bot.send('Proxy doesn\'t exists!')
+                  }
+                  break
+
+                default:
+                  bot.send('Proxy format should be: <ip:port> / <ip:port:username:password>')
+                  break
+              }
+            }
+            break
+
+          case '-clear':
+            monitor.clearProxies()
+            bot.send('Proxy pool has been cleared successfully!')
+            break
+          default:
+            bot.send(commandList)
+            break
+        }
+      }
+      break
+  }
+})
+
+client.login(process.env.DISCORD_TOKEN)
