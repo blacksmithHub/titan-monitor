@@ -66,8 +66,7 @@ function startMonitor () {
               filters: [
                 {
                   field: 'attribute_set_id',
-                  value: '10',
-                  condition_type: 'eq'
+                  value: '10'
                 }
               ]
             }
@@ -242,6 +241,8 @@ async function sendWebhook (footwear, footwearSizes) {
         return (!val.extension_attributes.out_of_stock) ? sku : ''
       })
         .filter((el) => el)
+    } else {
+      item.sizes = []
     }
 
     return item
