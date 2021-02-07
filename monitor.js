@@ -10,9 +10,9 @@ config({ path: `${__dirname}/.env` })
 
 let hooks = []
 let loop = null
-let pool = []
 let delay = 60000
 let status = 'idle'
+let pool = []
 
 /**
  * Start backend monitor
@@ -24,6 +24,11 @@ function startMonitor () {
   if (validate) hooks = []
 
   loop = setTimeout(async () => {
+    if (status === 'idle') {
+      clearTimeout(loop)
+      return false
+    }
+
     try {
       console.log('Monitoring...')
 
@@ -32,8 +37,11 @@ function startMonitor () {
       if (pool.length) {
         let proxy = pool[Math.floor(Math.random() * pool.length)]
 
+        console.log(proxy)
+
         proxy = proxy.split(':')
 
+        // username:password:ip:port
         request = request.defaults({ proxy: `http://${proxy[2]}:${proxy[3]}@${proxy[0]}:${proxy[1]}` })
       }
 
@@ -82,101 +90,108 @@ function startMonitor () {
       }
 
       await request(config, async (error, response) => {
-        if (error) {
-          console.log(error)
-          clearTimeout(loop)
-          startMonitor()
-        }
-
-        if (response.statusCode === 200) {
-          const products = JSON.parse(response.body).items
-
-          const footwearSizes = products.slice().filter((val) => val.custom_attributes.find((el) => el.attribute_code === 'm_footwear_size'))
-          let footwear = products.slice().filter((val) => !val.custom_attributes.find((el) => el.attribute_code === 'm_footwear_size'))
-
-          let collect = []
-
-          if (footwearSizes.length) {
-            collect = footwearSizes.slice().map(element => {
-              const sku = element.sku.split('-')
-              sku.pop()
-
-              const check = footwear.slice().find((val) => _.includes(val.sku, sku.join('-')))
-
-              return (!check) ? sku.join('-') : ''
-            })
-
-            collect = _.uniq(collect).filter((el) => el)
+        try {
+          if (error) {
+            console.log(error)
+            restartMonitor()
           }
 
-          if (collect.length) {
-            collect = collect.map(element => {
-              return {
-                field: 'sku',
-                value: element
-              }
-            })
+          if (response.statusCode === 200) {
+            const products = JSON.parse(response.body).items
 
-            const payload = {
-              searchCriteria: {
-                filterGroups: [
-                  {
-                    filters: collect
-                  },
-                  {
-                    filters: [
-                      {
-                        field: 'attribute_set_id',
-                        value: '10',
-                        condition_type: 'eq'
-                      }
-                    ]
+            const footwearSizes = products.slice().filter((val) => val.custom_attributes.find((el) => el.attribute_code === 'm_footwear_size'))
+            let footwear = products.slice().filter((val) => !val.custom_attributes.find((el) => el.attribute_code === 'm_footwear_size'))
+
+            let collect = []
+
+            if (footwearSizes.length) {
+              collect = footwearSizes.slice().map(element => {
+                const sku = element.sku.split('-')
+                sku.pop()
+
+                const check = footwear.slice().find((val) => _.includes(val.sku, sku.join('-')))
+
+                return (!check) ? sku.join('-') : ''
+              })
+
+              collect = _.uniq(collect).filter((el) => el)
+            }
+
+            if (collect.length) {
+              collect = collect.map(element => {
+                return {
+                  field: 'sku',
+                  value: element
+                }
+              })
+
+              const payload = {
+                searchCriteria: {
+                  filterGroups: [
+                    {
+                      filters: collect
+                    },
+                    {
+                      filters: [
+                        {
+                          field: 'attribute_set_id',
+                          value: '10',
+                          condition_type: 'eq'
+                        }
+                      ]
+                    }
+                  ]
+                }
+              }
+
+              const query = qs.stringify(payload)
+
+              const userAgent = new UserAgent()
+
+              const config = {
+                uri: `${process.env.TITAN_DOMAIN}/rest/V2/products?${query}`,
+                method: 'get',
+                headers: {
+                  'Content-Type': 'application/json',
+                  Authorization: `Bearer ${process.env.TITAN_TOKEN}`,
+                  'User-Agent': userAgent.toString()
+                }
+              }
+
+              await request(config, (error, response) => {
+                try {
+                  if (error) {
+                    console.log(error)
+                    restartMonitor()
                   }
-                ]
-              }
+
+                  if (response.statusCode === 200) {
+                    footwear = footwear.concat(JSON.parse(response.body).items)
+                    sendWebhook(footwear, footwearSizes)
+                  } else {
+                    console.log(response)
+                    restartMonitor()
+                  }
+                } catch (error) {
+                  console.log(error)
+                  restartMonitor()
+                }
+              })
+            } else {
+              sendWebhook(footwear, footwearSizes)
             }
-
-            const query = qs.stringify(payload)
-
-            const userAgent = new UserAgent()
-
-            const config = {
-              uri: `${process.env.TITAN_DOMAIN}/rest/V2/products?${query}`,
-              method: 'get',
-              headers: {
-                'Content-Type': 'application/json',
-                Authorization: `Bearer ${process.env.TITAN_TOKEN}`,
-                'User-Agent': userAgent.toString()
-              }
-            }
-
-            console.log('one')
-
-            await request(config, (error, response) => {
-              if (error) {
-                console.log(error)
-                clearTimeout(loop)
-                startMonitor()
-              }
-
-              if (response.statusCode === 200) {
-                footwear = footwear.concat(JSON.parse(response.body).items)
-                sendWebhook(footwear, footwearSizes)
-              }
-            })
           } else {
-            sendWebhook(footwear, footwearSizes)
+            console.log(response)
+            restartMonitor()
           }
-        } else {
-          console.log(response.statusCode)
-          clearTimeout(loop)
-          startMonitor()
+        } catch (error) {
+          console.log(error)
+          restartMonitor()
         }
       })
     } catch (error) {
       console.log(error)
-      clearTimeout(loop)
-      startMonitor()
+      restartMonitor()
     }
   }, delay)
 }
@@ -353,8 +368,8 @@ function stopMonitor () {
  */
 function setDelay (ms) {
   delay = ms
-  restartMonitor()
-  console.log(delay)
+
+  if (status === 'running') restartMonitor()
 }
 
 /**

@@ -9,6 +9,7 @@ const client = new Discord.Client()
 
 const prefix = '!T'
 const commands = ['info', 'help', 'start', 'stop', 'restart', 'proxy', 'delay']
+const roles = ['764438322276728845', '764439684470145036', '764436581128994826', '807634790425034823', '787312447751979009']
 
 const commandList = new Discord.MessageEmbed()
   .setColor('#f7b586')
@@ -19,7 +20,6 @@ const commandList = new Discord.MessageEmbed()
     { name: 'Start Monitor', value: '`!Tstart` \nTo start monitor', inline: true },
     { name: 'Stop Monitor', value: '`!Tstop` \nTo stop monitor', inline: true },
     { name: 'Restart Monitor', value: '`!Trestart` \nAllows you to restart the monitor', inline: true },
-    { name: 'List All Proxy', value: '`!Tproxy -list` \nTo show all proxies', inline: true },
     { name: 'Add New Proxy', value: '`!Tproxy -add <proxy>` \nAllows you to add new proxy to monitor', inline: true },
     { name: 'Remove Proxy', value: '`!Tproxy -rm <proxy>` \nAllows you to remove proxy from the list', inline: true },
     { name: 'Clear Proxies', value: '`!Tproxy -clear` \nAllows you to clear all proxies from the list', inline: true },
@@ -28,10 +28,14 @@ const commandList = new Discord.MessageEmbed()
 
 client.once('ready', () => {
   console.log('Talos Bot is now online!')
-  monitor.restartMonitor()
 })
 
 client.on('message', message => {
+  if (!message.member.roles.cache.find((val) => roles.includes(val.id))) {
+    message.channel.send('You must have the permission to use this command!')
+    return
+  }
+
   if (!message.content.startsWith(prefix) || message.author.bot || message.channel.id !== process.env.CHANNEL) return
 
   const args = message.content.slice(prefix.length).split(/ +/)
@@ -63,17 +67,17 @@ client.on('message', message => {
       break
 
     case 'start':
-      // monitor.restartMonitor()
+      monitor.restartMonitor()
       bot.send('Monitor is now running!')
       break
 
     case 'stop':
-      // monitor.stopMonitor()
-      bot.send('Monitor has been stopped running!')
+      monitor.stopMonitor()
+      bot.send('Monitor has been stopped!')
       break
 
     case 'restart':
-      // monitor.restartMonitor()
+      monitor.restartMonitor()
       bot.send('Monitor has been restarted!')
       break
 
@@ -95,70 +99,74 @@ client.on('message', message => {
         const key = message.content.slice((`${prefix}${command}`).length + 1).split(/ +/).shift().toLowerCase()
 
         switch (key) {
-          case '-list':
-            {
-              const proxies = new Discord.MessageEmbed()
-                .setColor('#f7b586')
-                .addFields({ name: 'Proxy Pool', value: `${(monitor.getPool().length) ? monitor.getPool() : 'empty'}`, inline: true })
-
-              bot.send(proxies)
-            }
-            break
-
           case '-add':
             {
-              let proxy = message.content.slice((`${prefix}${command} ${key}`).length + 1).split(/ +/).shift().toLowerCase()
+              let proxies = message.content.slice((`${prefix}${command} ${key}`).length + 1).split(/ +/).shift()
 
-              if (!proxy) {
+              if (!proxies) {
                 bot.send(commandList)
                 break
               }
 
-              proxy = proxy.split(':')
+              proxies = proxies.split(',')
 
-              switch (proxy.length) {
-                case 4:
-                case 2:
-                  if (!monitor.getPool().find((el) => el === proxy.join(':'))) {
-                    monitor.addProxy(proxy.join(':'))
-                    bot.send('Proxy has been added successfully!')
-                  } else {
-                    bot.send('Proxy already exists!')
+              if (proxies.length) {
+                for (let index = 0; index < proxies.length; index++) {
+                  const proxy = proxies[index].split(':')
+
+                  switch (proxy.length) {
+                    case 4:
+                    case 2:
+                      if (!monitor.getPool().find((el) => el === proxy.join(':'))) {
+                        monitor.addProxy(proxy.join(':'))
+                      } else {
+                        bot.send(`Proxy already exists! ${proxy.join(':')}`)
+                      }
+                      break
+
+                    default:
+                      bot.send('Proxy format should be: <ip:port> / <ip:port:username:password>')
+                      break
                   }
-                  break
+                }
 
-                default:
-                  bot.send('Proxy format should be: <ip:port> / <ip:port:username:password>')
-                  break
+                bot.send('Proxies has been added successfully!')
               }
             }
             break
 
           case '-rm':
             {
-              let proxy = message.content.slice((`${prefix}${command} ${key}`).length + 1).split(/ +/).shift().toLowerCase()
+              let proxies = message.content.slice((`${prefix}${command} ${key}`).length + 1).split(/ +/).shift().toLowerCase()
 
-              if (!proxy) {
+              if (!proxies) {
                 bot.send(commandList)
                 break
               }
 
-              proxy = proxy.split(':')
+              proxies = proxies.split(',')
 
-              switch (proxy.length) {
-                case 4:
-                case 2:
-                  if (monitor.getPool().find((el) => el === proxy.join(':'))) {
-                    monitor.removeProxy(proxy.join(':'))
-                    bot.send('Proxy has been removed successfully!')
-                  } else {
-                    bot.send('Proxy doesn\'t exists!')
+              if (proxies.length) {
+                for (let index = 0; index < proxies.length; index++) {
+                  const proxy = proxies[index].split(':')
+
+                  switch (proxy.length) {
+                    case 4:
+                    case 2:
+                      if (monitor.getPool().find((el) => el === proxy.join(':'))) {
+                        monitor.removeProxy(proxy.join(':'))
+                      } else {
+                        bot.send(`Proxy doesn't exists! ${proxy.join(':')}`)
+                      }
+                      break
+
+                    default:
+                      bot.send('Proxy format should be: <ip:port> / <ip:port:username:password>')
+                      break
                   }
-                  break
+                }
 
-                default:
-                  bot.send('Proxy format should be: <ip:port> / <ip:port:username:password>')
-                  break
+                bot.send('Proxies has been removed successfully!')
               }
             }
             break
