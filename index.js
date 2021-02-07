@@ -14,21 +14,21 @@ const commandList = new Discord.MessageEmbed()
   .setColor('#f7b586')
   .setTitle('Talos Bot Help Commands:')
   .addFields(
-    { name: 'Monitor Information', value: '`!info` \nTo show all monitor information', inline: true },
-    { name: 'Command list', value: '`!help` \nTo show all available commands', inline: true },
-    { name: 'Start Monitor', value: '`!start` \nTo start monitor', inline: true },
-    { name: 'Stop Monitor', value: '`!stop` \nTo stop monitor', inline: true },
-    { name: 'Restart Monitor', value: '`!restart` \nAllows you to restart the monitor', inline: true },
-    { name: 'List All Proxy', value: '`!proxy -list` \nTo show all proxies', inline: true },
-    { name: 'Add New Proxy', value: '`!proxy -add <proxy>` \nAllows you to add new proxy to monitor', inline: true },
-    { name: 'Remove Proxy', value: '`!proxy -rm <proxy>` \nAllows you to remove proxy from the list', inline: true },
-    { name: 'Clear Proxies', value: '`!proxy -clear` \nAllows you to clear all proxies from the list', inline: true },
-    { name: 'Set Delay', value: '`!delay <ms>` \nTo set monitor delay', inline: true }
+    { name: 'Monitor Information', value: '`!Tinfo` \nTo show all monitor information', inline: true },
+    { name: 'Command list', value: '`!Thelp` \nTo show all available commands', inline: true },
+    { name: 'Start Monitor', value: '`!Tstart` \nTo start monitor', inline: true },
+    { name: 'Stop Monitor', value: '`!Tstop` \nTo stop monitor', inline: true },
+    { name: 'Restart Monitor', value: '`!Trestart` \nAllows you to restart the monitor', inline: true },
+    { name: 'List All Proxy', value: '`!Tproxy -list` \nTo show all proxies', inline: true },
+    { name: 'Add New Proxy', value: '`!Tproxy -add <proxy>` \nAllows you to add new proxy to monitor', inline: true },
+    { name: 'Remove Proxy', value: '`!Tproxy -rm <proxy>` \nAllows you to remove proxy from the list', inline: true },
+    { name: 'Clear Proxies', value: '`!Tproxy -clear` \nAllows you to clear all proxies from the list', inline: true },
+    { name: 'Set Delay', value: '`!Tdelay <ms>` \nTo set monitor delay', inline: true }
   )
 
 client.once('ready', () => {
   console.log('Talos Bot is now online!')
-  monitor.startMonitor()
+  monitor.restartMonitor()
 })
 
 client.on('message', message => {
