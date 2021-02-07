@@ -31,16 +31,16 @@ client.once('ready', () => {
 })
 
 client.on('message', message => {
+  if (!message.content.startsWith(prefix) || message.author.bot) return
+
   if (!message.member.roles.cache.find((val) => roles.includes(val.id))) {
     message.channel.send('You must have the permission to use this command!')
     return
   }
 
-  if (!message.content.startsWith(prefix) || message.author.bot || message.channel.id !== process.env.CHANNEL) return
-
   const args = message.content.slice(prefix.length).split(/ +/)
   const command = args.shift().toLowerCase()
-  const bot = client.channels.cache.find(channel => channel.id === process.env.CHANNEL)
+  const bot = message.channel
 
   if (!commands.includes(command)) {
     bot.send(commandList)
