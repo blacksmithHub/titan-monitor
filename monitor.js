@@ -99,7 +99,7 @@ function startMonitor () {
             const products = JSON.parse(response.body).items
 
             const footwearSizes = products.slice().filter((val) => val.custom_attributes.find((el) => el.attribute_code === 'm_footwear_size'))
-            let footwear = products.slice().filter((val) => !val.custom_attributes.find((el) => el.attribute_code === 'm_footwear_size'))
+            const footwear = products.slice().filter((val) => !val.custom_attributes.find((el) => el.attribute_code === 'm_footwear_size'))
 
             let collect = []
 
@@ -116,11 +116,14 @@ function startMonitor () {
               collect = _.uniq(collect).filter((el) => el)
             }
 
+            collect = collect.concat(footwear.slice().map(element => element.sku))
+
             if (collect.length) {
-              collect = collect.map(element => {
+              const filters = collect.slice().map(element => {
                 return {
                   field: 'sku',
-                  value: element
+                  value: `%${element}%`,
+                  condition_type: 'like'
                 }
               })
 
@@ -128,16 +131,7 @@ function startMonitor () {
                 searchCriteria: {
                   filterGroups: [
                     {
-                      filters: collect
-                    },
-                    {
-                      filters: [
-                        {
-                          field: 'attribute_set_id',
-                          value: '10',
-                          condition_type: 'eq'
-                        }
-                      ]
+                      filters: filters
                     }
                   ]
                 }
@@ -157,7 +151,7 @@ function startMonitor () {
                 }
               }
 
-              await request(config, (error, response) => {
+              await request(config, async (error, response) => {
                 try {
                   if (error) {
                     console.log(error)
@@ -165,8 +159,10 @@ function startMonitor () {
                   }
 
                   if (response.statusCode === 200) {
-                    footwear = footwear.concat(JSON.parse(response.body).items)
-                    sendWebhook(footwear, footwearSizes)
+                    const products = JSON.parse(response.body).items
+                    const main = products.filter((el) => collect.includes(el.sku))
+                    const sub = products.filter((el) => !collect.includes(el.sku))
+                    sendWebhook(main, sub)
                   } else {
                     console.log(response)
                     restartMonitor()
@@ -177,7 +173,7 @@ function startMonitor () {
                 }
               })
             } else {
-              sendWebhook(footwear, footwearSizes)
+              restartMonitor()
             }
           } else {
             console.log(response)
@@ -349,9 +345,9 @@ function clearProxies () {
  *
  */
 function restartMonitor () {
+  status = 'running'
   clearTimeout(loop)
   startMonitor()
-  status = 'running'
 }
 
 /**
@@ -359,8 +355,8 @@ function restartMonitor () {
  *
  */
 function stopMonitor () {
-  clearTimeout(loop)
   status = 'idle'
+  clearTimeout(loop)
 }
 
 /**
@@ -407,5 +403,6 @@ module.exports = {
   setDelay,
   getStatus,
   getDelay,
-  getPool
+  getPool,
+  sendWebhook
 }
