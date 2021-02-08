@@ -1,63 +1,125 @@
 const { config } = require('dotenv')
 
 const Discord = require('discord.js')
-const UserAgent = require('user-agents')
-const qs = require('qs')
 const moment = require('moment')
 const _ = require('lodash')
+const api = require('./api')
+const discord = require('./discord')
 
 config({ path: `${__dirname}/.env` })
 
 let hooks = []
+let pool = ['45.91.115.146:63146:run:K35f2SvF']
 let loop = null
-let delay = 60000
 let status = 'idle'
-let pool = []
+let monitorInterval = 60000
+let webhookInterval = 5000
 
 /**
  * Start backend monitor
- *
  */
 function startMonitor () {
-  const validate = hooks.find((val) => moment(val.created_at).format('YYYY-MM-DD') !== moment().format('YYYY-MM-DD') || moment(val.updated_at).format('YYYY-MM-DD') !== moment().format('YYYY-MM-DD'))
-
+  const currentDate = moment().format('YYYY-MM-DD')
+  const validate = hooks.find((val) => moment(val.created_at).format('YYYY-MM-DD') !== currentDate || moment(val.updated_at).format('YYYY-MM-DD') !== currentDate)
+  // clear hooks if not to date
   if (validate) hooks = []
 
   loop = setTimeout(async () => {
+    // exit if idle
     if (status === 'idle') {
       clearTimeout(loop)
       return false
     }
 
     try {
-      console.log('Monitoring...')
+      const response = await getUpdatedProducts()
 
-      let request = require('request')
+      if (response && !response.status) {
+        const products = response.items
 
-      if (pool.length) {
-        let proxy = pool[Math.floor(Math.random() * pool.length)]
+        const footwearSizes = products.slice().filter((val) => val.custom_attributes.find((el) => el.attribute_code === 'm_footwear_size'))
+        const footwear = products.slice().filter((val) => !val.custom_attributes.find((el) => el.attribute_code === 'm_footwear_size'))
 
-        console.log(proxy)
+        let collect = []
+        // collect all main sku
+        if (footwearSizes.length) {
+          collect = footwearSizes.slice().map(element => {
+            const sku = element.sku.split('-')
+            sku.pop()
 
-        proxy = proxy.split(':')
+            const check = footwear.slice().find((val) => _.includes(val.sku, sku.join('-')))
 
-        // username:password:ip:port
-        request = request.defaults({ proxy: `http://${proxy[2]}:${proxy[3]}@${proxy[0]}:${proxy[1]}` })
+            return (!check) ? sku.join('-') : ''
+          })
+
+          collect = _.uniq(collect).filter((el) => el)
+        }
+
+        collect = collect.concat(footwear.slice().map(element => element.sku))
+
+        if (collect.length) {
+          // fetch all available sizes per sku
+          const filters = collect.slice().map(element => {
+            return {
+              field: 'sku',
+              value: `%${element}%`,
+              condition_type: 'like'
+            }
+          })
+
+          const chunks = new Array(Math.ceil(filters.length / 15))
+            .fill()
+            .map(_ => filters.splice(0, 15))
+
+          const results = await getAvailableSizes(chunks)
+
+          const main = results.filter((el) => collect.includes(el.sku))
+          const sub = results.filter((el) => !collect.includes(el.sku))
+
+          sendWebhook(main, sub)
+        } else {
+          restartMonitor()
+        }
+      } else {
+        console.log(response)
+        restartMonitor()
       }
+    } catch (error) {
+      console.log(error)
+      restartMonitor()
+    }
+  }, monitorInterval)
+}
 
-      const payload = {
+/**
+ * Get updated products
+ *
+ * @return object
+ */
+async function getUpdatedProducts () {
+  let data = null
+
+  while (!data) {
+    console.log('Monitoring...')
+
+    await new Promise(resolve => setTimeout(resolve, 1000))
+
+    const currentDate = moment('00:00:00', 'HH:mm').format('YYYY-MM-DD HH:mm:ss')
+
+    const params = {
+      payload: {
         searchCriteria: {
           filterGroups: [
             {
               filters: [
                 {
                   field: 'updated_at',
-                  value: moment('00:00:00', 'HH:mm').format('YYYY-MM-DD HH:mm:ss'),
+                  value: currentDate,
                   condition_type: 'gteq'
                 },
                 {
                   field: 'created_at',
-                  value: moment('00:00:00', 'HH:mm').format('YYYY-MM-DD HH:mm:ss'),
+                  value: currentDate,
                   condition_type: 'gteq'
                 }
               ]
@@ -70,133 +132,102 @@ function startMonitor () {
                 }
               ]
             }
-          ]
+          ],
+          pageSize: 10000
         }
       }
-
-      const query = qs.stringify(payload)
-
-      const userAgent = new UserAgent()
-
-      const config = {
-        uri: `${process.env.TITAN_DOMAIN}/rest/V2/products?${query}`,
-        method: 'get',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${process.env.TITAN_TOKEN}`,
-          'User-Agent': userAgent.toString()
-        }
-      }
-
-      await request(config, async (error, response) => {
-        try {
-          if (error) {
-            console.log(error)
-            restartMonitor()
-          }
-
-          if (response.statusCode === 200) {
-            const products = JSON.parse(response.body).items
-
-            const footwearSizes = products.slice().filter((val) => val.custom_attributes.find((el) => el.attribute_code === 'm_footwear_size'))
-            const footwear = products.slice().filter((val) => !val.custom_attributes.find((el) => el.attribute_code === 'm_footwear_size'))
-
-            let collect = []
-
-            if (footwearSizes.length) {
-              collect = footwearSizes.slice().map(element => {
-                const sku = element.sku.split('-')
-                sku.pop()
-
-                const check = footwear.slice().find((val) => _.includes(val.sku, sku.join('-')))
-
-                return (!check) ? sku.join('-') : ''
-              })
-
-              collect = _.uniq(collect).filter((el) => el)
-            }
-
-            collect = collect.concat(footwear.slice().map(element => element.sku))
-
-            if (collect.length) {
-              const filters = collect.slice().map(element => {
-                return {
-                  field: 'sku',
-                  value: `%${element}%`,
-                  condition_type: 'like'
-                }
-              })
-
-              const payload = {
-                searchCriteria: {
-                  filterGroups: [
-                    {
-                      filters: filters
-                    }
-                  ]
-                }
-              }
-
-              const query = qs.stringify(payload)
-
-              const userAgent = new UserAgent()
-
-              const config = {
-                uri: `${process.env.TITAN_DOMAIN}/rest/V2/products?${query}`,
-                method: 'get',
-                headers: {
-                  'Content-Type': 'application/json',
-                  Authorization: `Bearer ${process.env.TITAN_TOKEN}`,
-                  'User-Agent': userAgent.toString()
-                }
-              }
-
-              await request(config, async (error, response) => {
-                try {
-                  if (error) {
-                    console.log(error)
-                    restartMonitor()
-                  }
-
-                  if (response.statusCode === 200) {
-                    const products = JSON.parse(response.body).items
-                    const main = products.filter((el) => collect.includes(el.sku))
-                    const sub = products.filter((el) => !collect.includes(el.sku))
-                    sendWebhook(main, sub)
-                  } else {
-                    console.log(response)
-                    restartMonitor()
-                  }
-                } catch (error) {
-                  console.log(error)
-                  restartMonitor()
-                }
-              })
-            } else {
-              restartMonitor()
-            }
-          } else {
-            console.log(response)
-            restartMonitor()
-          }
-        } catch (error) {
-          console.log(error)
-          restartMonitor()
-        }
-      })
-    } catch (error) {
-      console.log(error)
-      restartMonitor()
     }
-  }, delay)
+
+    if (pool.length) {
+      const proxy = pool[Math.floor(Math.random() * pool.length)]
+      params.proxy = proxy
+    }
+
+    const response = await api.search(params)
+
+    if (response && !response.status) {
+      data = response
+    } else {
+      console.log(response)
+    }
+  }
+
+  return data
 }
 
 /**
-   * Send webhook to discord
-   *
-   * @param {*} footwear
-   * @param {*} footwearSizes
-   */
+ * Chunk all sizes
+ *
+ * @param chunks
+ * @return array
+ */
+async function getAvailableSizes (chunks) {
+  let data = []
+
+  for (let index = 0; index < chunks.length; index++) {
+    const response = await fetchSizes(chunks[index])
+
+    if (response && !response.status) {
+      data = data.concat(response.items)
+    } else {
+      console.log(response)
+      continue
+    }
+  }
+
+  return data
+}
+
+/**
+ * Fetch all sizes
+ *
+ * @param chunk
+ * @return object
+ */
+async function fetchSizes (chunk) {
+  let data = null
+
+  while (!data) {
+    console.log('Fetching...')
+
+    await new Promise(resolve => setTimeout(resolve, 1000))
+
+    const params = {
+      payload: {
+        searchCriteria: {
+          filterGroups: [
+            {
+              filters: chunk
+            }
+          ],
+          pageSize: 10000
+        }
+      }
+    }
+
+    if (pool.length) {
+      const proxy = pool[Math.floor(Math.random() * pool.length)]
+      params.proxy = proxy
+    }
+
+    const response = await api.search(params)
+
+    if (response && !response.status) {
+      data = response
+    } else {
+      console.log(response)
+    }
+  }
+
+  return data
+}
+
+/**
+ * Send webhook to discord
+ *
+ * @param footwear
+ * @param footwearSizes
+ */
 async function sendWebhook (footwear, footwearSizes) {
   let results = footwear.slice().map(element => {
     const url = element.custom_attributes.find((val) => val.attribute_code === 'url_key')
@@ -214,14 +245,11 @@ async function sendWebhook (footwear, footwearSizes) {
 
     if (sizes.length) {
       item.sizes = sizes.map((val) => {
-        let urlSize = val.custom_attributes.find((value) => value.attribute_code === 'url_key')
         let imgurlSize = val.custom_attributes.find((value) => value.attribute_code === 'image')
 
-        urlSize = (urlSize) ? urlSize.value : ''
         imgurlSize = (imgurlSize) ? imgurlSize.value : ''
 
         item.price = val.price || item.price
-        item.page = urlSize || item.page
         item.img = imgurlSize || item.img
 
         let sku = val.sku.slice(val.sku.length - 4)
@@ -265,50 +293,55 @@ async function sendWebhook (footwear, footwearSizes) {
 
   if (results.length) {
     for (let index = 0; index < results.length; index++) {
-      console.log(results[index].name)
+      console.log(results[index].sku, results[index].name)
 
-      if (index) await new Promise(resolve => setTimeout(resolve, 5000))
+      if (index) await new Promise(resolve => setTimeout(resolve, webhookInterval))
 
-      const url = process.env.WEBHOOK.split('/')
-      const webhookClient = new Discord.WebhookClient(url[5], url[6])
+      for (let i = 0; i < discord.getWebhooks().length; i++) {
+        const url = discord.getWebhooks()[i].split('/')
+        const webhookClient = new Discord.WebhookClient(url[5], url[6])
 
-      const embed = new Discord.MessageEmbed().setColor('#f7b586')
+        const embed = new Discord.MessageEmbed()
+          .setColor(discord.getColor())
+          .setTimestamp()
+          .setFooter(discord.getUsername(), discord.getAvatar())
 
-      if (results[index].img) {
-        let slug = results[index].img.split(/ +/)
+        if (results[index].img) {
+          let slug = results[index].img.split(/ +/)
 
-        if (slug.length > 1) {
-          slug = slug.join('%20')
-        } else {
-          slug = results[index].img
+          if (slug.length > 1) {
+            slug = slug.join('%20')
+          } else {
+            slug = results[index].img
+          }
+
+          embed.setThumbnail(`${process.env.TITAN_DOMAIN}/media/catalog/product${slug}`)
         }
 
-        embed.setThumbnail(`${process.env.TITAN_DOMAIN}/media/catalog/product${slug}`)
-      }
+        if (results[index].name && results[index].sku) embed.addField(results[index].name, results[index].sku)
 
-      if (results[index].name && results[index].sku) embed.addField(results[index].name, results[index].sku)
+        if (results[index].sizes.length) embed.addField('Sizes:', _.uniq(results[index].sizes), true)
 
-      if (results[index].sizes.length) embed.addField('Sizes:', _.uniq(results[index].sizes), true)
+        embed.addField('Price', `Php ${results[index].price.toLocaleString()}`, true)
 
-      embed.addField('Price', `Php ${results[index].price.toLocaleString()}`, true)
+        if (results[index].page) {
+          let slug = results[index].page.split(/ +/)
 
-      if (results[index].page) {
-        let slug = results[index].page.split(/ +/)
+          if (slug.length > 1) {
+            slug = slug.join('%20')
+          } else {
+            slug = results[index].page
+          }
 
-        if (slug.length > 1) {
-          slug = slug.join('%20')
-        } else {
-          slug = results[index].page
+          embed.addField('Product Page', `[Link](${process.env.TITAN_DOMAIN}/${slug}.html)`, true)
         }
 
-        embed.addField('Product Page', `[Link](${process.env.TITAN_DOMAIN}/${slug}.html)`, true)
+        await webhookClient.send({
+          username: discord.getUsername(),
+          avatarURL: discord.getAvatar(),
+          embeds: [embed]
+        })
       }
-
-      await webhookClient.send({
-        username: 'TALOS-IO',
-        avatarURL: 'https://i.imgur.com/3HQZ0ol.png',
-        embeds: [embed]
-      })
     }
   }
 
@@ -319,6 +352,7 @@ async function sendWebhook (footwear, footwearSizes) {
 /**
  * Add new proxy
  *
+ * @param proxy
  */
 function addProxy (proxy) {
   pool.push(proxy.trim())
@@ -327,6 +361,7 @@ function addProxy (proxy) {
 /**
  * Remove proxy
  *
+ * @param proxy
  */
 function removeProxy (proxy) {
   pool = pool.slice().filter((val) => val.trim() !== proxy.trim())
@@ -334,7 +369,6 @@ function removeProxy (proxy) {
 
 /**
  * Clear proxy pool
- *
  */
 function clearProxies () {
   pool = []
@@ -342,7 +376,6 @@ function clearProxies () {
 
 /**
  * Restart monitor
- *
  */
 function restartMonitor () {
   status = 'running'
@@ -352,7 +385,6 @@ function restartMonitor () {
 
 /**
  * Stop monitor
- *
  */
 function stopMonitor () {
   status = 'idle'
@@ -360,49 +392,79 @@ function stopMonitor () {
 }
 
 /**
- * Stop monitor
+ * Set monitor interval
  *
+ * @param ms
  */
-function setDelay (ms) {
-  delay = ms
+function setMonitorInterval (ms) {
+  monitorInterval = ms
 
   if (status === 'running') restartMonitor()
 }
 
 /**
- * Return pool
+ * Return proxy pool
  *
+ * @return array
  */
 function getPool () {
   return pool
 }
 
 /**
- * Return delay
+ * Return monitor interval
  *
+ * @return integer
  */
-function getDelay () {
-  return delay
+function getMonitorInterval () {
+  return monitorInterval
+}
+
+/**
+ * Return webhook interval
+ *
+ * @return integer
+ */
+function getWebhookInterval () {
+  return webhookInterval
+}
+
+/**
+ * Set webhook interval
+ *
+ * @param ms
+ */
+function setWebhookInterval (ms) {
+  webhookInterval = ms
 }
 
 /**
  * Return status
  *
+ * @return string
  */
 function getStatus () {
   return status
 }
 
 module.exports = {
+  // actions
   startMonitor,
   restartMonitor,
   stopMonitor,
+  sendWebhook,
+  // proxy handlers
   addProxy,
   removeProxy,
   clearProxies,
-  setDelay,
+  // monitor handlers
+  setMonitorInterval,
+  setWebhookInterval,
+  // request
   getStatus,
-  getDelay,
+  getMonitorInterval,
+  getWebhookInterval,
   getPool,
-  sendWebhook
+  getAvailableSizes,
+  getUpdatedProducts
 }
