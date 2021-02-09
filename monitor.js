@@ -9,20 +9,26 @@ const discord = require('./discord')
 config({ path: `${__dirname}/.env` })
 
 let hooks = []
-let pool = ['45.91.115.146:63146:run:K35f2SvF']
+let pool = []
 let loop = null
 let status = 'idle'
 let monitorInterval = 60000
 let webhookInterval = 5000
+let webhookLog = ''
+const red = '#FF0000'
+const green = '#008000'
 
 /**
  * Start backend monitor
  */
-function startMonitor () {
+async function startMonitor () {
   const currentDate = moment().format('YYYY-MM-DD')
   const validate = hooks.find((val) => moment(val.created_at).format('YYYY-MM-DD') !== currentDate || moment(val.updated_at).format('YYYY-MM-DD') !== currentDate)
   // clear hooks if not to date
-  if (validate) hooks = []
+  if (validate) {
+    hooks = []
+    await sendLogs({ color: green, message: 'Hooks has been cleared successfully!' })
+  }
 
   loop = setTimeout(async () => {
     // exit if idle
@@ -81,11 +87,11 @@ function startMonitor () {
           restartMonitor()
         }
       } else {
-        console.log(response)
+        await sendLogs({ color: red, message: response })
         restartMonitor()
       }
     } catch (error) {
-      console.log(error)
+      await sendLogs({ color: red, message: error })
       restartMonitor()
     }
   }, monitorInterval)
@@ -100,7 +106,7 @@ async function getUpdatedProducts () {
   let data = null
 
   while (!data) {
-    console.log('Monitoring...')
+    await sendLogs({ color: green, message: 'Monitoring...' })
 
     await new Promise(resolve => setTimeout(resolve, 1000))
 
@@ -148,7 +154,13 @@ async function getUpdatedProducts () {
     if (response && !response.status) {
       data = response
     } else {
-      console.log(response)
+      const obj = { color: red, message: response }
+
+      if (params.proxy) obj.proxy = params.proxy
+
+      await sendLogs(obj)
+
+      continue
     }
   }
 
@@ -170,7 +182,7 @@ async function getAvailableSizes (chunks) {
     if (response && !response.status) {
       data = data.concat(response.items)
     } else {
-      console.log(response)
+      await sendLogs({ color: red, message: response })
       continue
     }
   }
@@ -188,7 +200,7 @@ async function fetchSizes (chunk) {
   let data = null
 
   while (!data) {
-    console.log('Fetching...')
+    await sendLogs({ color: green, message: 'Fetching...' })
 
     await new Promise(resolve => setTimeout(resolve, 1000))
 
@@ -215,7 +227,13 @@ async function fetchSizes (chunk) {
     if (response && !response.status) {
       data = response
     } else {
-      console.log(response)
+      const obj = { color: red, message: response }
+
+      if (params.proxy) obj.proxy = params.proxy
+
+      await sendLogs(obj)
+
+      continue
     }
   }
 
@@ -292,9 +310,9 @@ async function sendWebhook (footwear, footwearSizes) {
   })
 
   if (results.length) {
-    for (let index = 0; index < results.length; index++) {
-      console.log(results[index].sku, results[index].name)
+    await sendLogs({ color: green, message: 'Products found!' })
 
+    for (let index = 0; index < results.length; index++) {
       if (index) await new Promise(resolve => setTimeout(resolve, webhookInterval))
 
       for (let i = 0; i < discord.getWebhooks().length; i++) {
@@ -447,12 +465,61 @@ function getStatus () {
   return status
 }
 
+/**
+ * send webhook logs
+ *
+ * @param params
+ */
+async function sendLogs (params) {
+  if (params.proxy) console.log('proxy:', params.proxy)
+  console.log('msg', params.message)
+
+  if (webhookLog) {
+    const url = webhookLog.split('/')
+    const webhookClient = new Discord.WebhookClient(url[5], url[6])
+
+    const embed = new Discord.MessageEmbed()
+      .setColor(params.color)
+      .setTimestamp()
+      .setFooter('Titan22 Monitor Logger')
+
+    let msg = params.message
+
+    if (!msg) {
+      msg = 'ECONNRESET!'
+    } else if (msg.status) {
+      msg = `${msg.status}: ${msg.statusText}`
+    }
+
+    if (params.proxy) {
+      embed.addField(params.proxy, msg)
+    } else {
+      embed.setDescription(msg)
+    }
+
+    await webhookClient.send({
+      username: 'Titan22 Monitor Logger',
+      embeds: [embed]
+    })
+  }
+}
+
+/**
+ * set webhook log
+ *
+ * @param url
+ */
+function setWebhookLog (url) {
+  webhookLog = url.trim()
+}
+
 module.exports = {
   // actions
   startMonitor,
   restartMonitor,
   stopMonitor,
   sendWebhook,
+  sendLogs,
   // proxy handlers
   addProxy,
   removeProxy,
@@ -460,6 +527,7 @@ module.exports = {
   // monitor handlers
   setMonitorInterval,
   setWebhookInterval,
+  setWebhookLog,
   // request
   getStatus,
   getMonitorInterval,

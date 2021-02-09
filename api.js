@@ -2,6 +2,8 @@ const axios = require('axios')
 const UserAgent = require('user-agents')
 const qs = require('qs')
 
+let token = ''
+
 /**
  * Perform search API
  */
@@ -15,7 +17,7 @@ function search (params) {
     method: 'get',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${process.env.TITAN_TOKEN}`,
+      Authorization: `Bearer ${token}`,
       'User-Agent': userAgent.toString()
     }
   }
@@ -41,6 +43,16 @@ function search (params) {
     .catch(({ response }) => response)
 }
 
+/**
+ * set api token
+ *
+ * @param param
+ */
+function setToken (param) {
+  token = param.trim()
+}
+
 module.exports = {
-  search
+  search,
+  setToken
 }
